@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blockchain Portfolio | Creative Developer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@300;500&display=swap');
+
+        :root {
+            --bg-dark: #050505;
+            --text-main: #ffffff;
+            --accent: #ff4d4d;
+            --grid-size: 20px;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: 'Space+Grotesk', sans-serif;
+            margin: 0;
+            overflow-x: hidden;
+        }
+
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100vh;
+            z-index: -1;
+            pointer-events: none;
+        }
+
+        #grid-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 5;
+            display: none;
+            background-size: var(--grid-size) var(--grid-size);
+            background-image: 
+                linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+        }
+
+        body.grid-active #grid-overlay { display: block; }
+
+        .overlay { position: relative; z-index: 10; transition: opacity 0.5s ease; }
+
+        .draggable {
+            position: absolute;
+            cursor: default;
+            transition: outline 0.2s;
+        }
+
+        body:not(.edit-active) .draggable[data-link] {
+            cursor: pointer !important;
+        }
+
+        .edit-active .draggable {
+            outline: 1px dashed rgba(255, 255, 255, 0.1);
+            cursor: move !important;
+        }
+
+        .edit-active .draggable:hover {
+            outline: 1px solid rgba(255, 255, 255, 0.4);
+        }
+
+        .selected-highlight {
+            outline: 2px solid var(--accent) !important;
+            z-index: 100;
+        }
+
+        .content-editable:focus {
+            outline: none;
+            background: rgba(255, 255, 255, 0.05);
+            cursor: text !important;
+        }
+
+        .resize-handle {
+            position: absolute;
+            bottom: -5px;
+            right: -5px;
+            width: 12px;
+            height: 12px;
+            background: var(--accent);
+            cursor: nwse-resize;
+            display: none;
+            z-index: 101;
+        }
+
+        .selected-highlight .resize-handle { display: block; }
+
+        #toolbar {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(20, 20, 20, 0.9);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            padding: 12px 24px;
+            border-radius: 50px;
+            display: none;
+            gap: 20px;
+            z-index: 1000;
+            align-items: center;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+            max-width: 95vw;
+        }
+
+        .edit-active #toolbar { display: flex; }
+
+        .tool-item {
+            background: transparent;
+            color: white;
+            border: none;
+            font-size: 10px;
+            font-weight: bold;
+            cursor: pointer;
+            opacity: 0.6;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .tool-item:hover { opacity: 1; color: var(--accent); }
+        .tool-item:disabled { opacity: 0.1; cursor: default; }
+        .tool-item.active { color: var(--accent); opacity: 1; }
+
+        .input-num {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 10px;
+            width: 45px;
+            text-align: center;
+            border-radius: 4px;
+            padding: 2px 0;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .input-num:focus { outline: 1px solid var(--accent); background: rgba(255, 255, 255, 0.2); }
+
+        .project-text {
+            font-size: clamp(2rem, 8vw, 5rem);
+            line-height: 1.1;
+            transition: all 0.5s ease;
+            display: inline-block;
+        }
+
+        .project-text:hover { font-style: italic; opacity: 0.6; }
+
+        .edit-btn {
+            background: #050505;
+            color: #050505;
+            padding: 8px 20px;
+            border-radius: 30px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            cursor: pointer;
+            z-index: 1001;
+            border: 1px solid #050505;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            outline: none;
+            user-select: none;
+        }
+
+        .edit-btn:hover { color: rgba(255, 255, 255, 0.02); }
+        .edit-btn.active { 
+            background: var(--accent); 
+            color: white; 
+            border-color: var(--accent);
+            box-shadow: 0 0 20px rgba(255, 77, 77, 0.3);
+        }
+
+        #auth-modal, #link-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(10px);
+            z-index: 2000;
+            display: none;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: #111;
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            width: 360px;
+        }
+
+        .modal-input {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            padding: 12px;
+            width: 100%;
+            margin: 20px 0;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 14px;
+        }
+
+        #height-controller {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: rgba(20, 20, 20, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            padding: 12px 20px;
+            border-radius: 12px;
+            z-index: 1000;
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+            backdrop-filter: blur(10px);
+        }
+        .edit-active #height-controller { display: flex; }
+
+        .page-content { display: none; min-height: 100vh; position: relative; }
+        .page-content.active { display: block; }
+
+        .back-btn {
+            position: absolute;
+            top: 80px;
+            left: 40px;
+            font-size: 10px;
+            letter-spacing: 0.3em;
+            cursor: pointer;
+            opacity: 0.4;
+            transition: opacity 0.3s;
+            z-index: 50;
+        }
+        .back-btn:hover { opacity: 1; }
+
+        input[type="range"] { accent-color: var(--accent); height: 4px; border-radius: 2px; }
+        .serif-font { font-family: 'Playfair Display', serif; }
+
+        #save-status {
+            font-size: 8px;
+            color: #4ade80;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        #save-status.visible { opacity: 1; }
+
+        .shape-element { width: 100%; height: 100%; border: 1px solid rgba(255,255,255,0.2); }
+        .shape-rect { background: rgba(255,255,255,0.05); }
+        .shape-circle { border-radius: 50%; background: rgba(255,255,255,0.05); }
+        .shape-line { height: 1px !important; background: white; border: none; }
+        
+        .uploaded-img { display: block; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
+    </style>
+</head>
+<body class="edit-ready">
+
+    <div id="canvas-container"></div>
+    <div id="grid-overlay"></div>
+
+    <!-- 암호 인증 모달 -->
+    <div id="auth-modal">
+        <div class="modal-content">
+            <h3 class="text-[10px] tracking-[0.3em] font-bold opacity-50 uppercase">Authentication Required</h3>
+            <!-- autocomplete="off"와 빈 텍스트 처리를 통해 보안 유지 -->
+            <input type="password" id="passInput" class="modal-input text-lg tracking-[0.5em]" placeholder="••••" autocomplete="off">
+            <div class="flex gap-2">
+                <button onclick="closeAuthModal()" class="flex-1 text-[9px] opacity-40 hover:opacity-100 uppercase py-2">Cancel</button>
+                <button onclick="verifyPassword()" class="flex-1 bg-white text-black text-[9px] font-bold uppercase py-2 rounded">Verify</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 링크 설정 모달 -->
+    <div id="link-modal">
+        <div class="modal-content">
+            <h3 class="text-[10px] tracking-[0.3em] font-bold opacity-50 uppercase">Set Hyperlink</h3>
+            <p class="text-[8px] opacity-30 mt-2">Enter View ID or 'new page'</p>
+            <input type="text" id="linkInput" class="modal-input" placeholder="e.g. landing, about, or new page">
+            <div class="flex flex-col gap-2">
+                <button onclick="saveLink('new page')" class="bg-white/10 hover:bg-white/20 text-[9px] uppercase py-2 rounded transition-colors">Create New Page</button>
+                <div class="flex gap-2 mt-2">
+                    <button onclick="closeLinkModal()" class="flex-1 text-[9px] opacity-40 hover:opacity-100 uppercase py-2">Cancel</button>
+                    <button onclick="saveLink()" class="flex-1 bg-red-500 text-white text-[9px] font-bold uppercase py-2 rounded">Set Link</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 툴바 (에딧 모드 활성화 시 표시) -->
+    <div id="toolbar">
+        <!-- 히스토리 도구 -->
+        <div class="flex flex-col items-start border-r border-white/10 pr-4">
+            <span class="text-[7px] opacity-40 mb-1 tracking-widest uppercase">History</span>
+            <div class="flex gap-3">
+                <button class="tool-item" id="undoBtn" onclick="undo()">UNDO</button>
+                <button class="tool-item" id="redoBtn" onclick="redo()">REDO</button>
+            </div>
+        </div>
+
+        <!-- 타이포그래피 도구 -->
+        <div class="flex flex-col items-start border-r border-white/10 pr-4" id="typo-tools">
+            <span class="text-[7px] opacity-40 mb-1 tracking-widest uppercase">Typography</span>
+            <div class="flex items-center gap-4">
+                <select id="fontSelector" onchange="changeFont(this.value)" class="tool-item bg-black/50 border border-white/10 rounded px-2 py-1 text-[9px]">
+                    <option value="'Space Grotesk', sans-serif">Sans-Serif</option>
+                    <option value="'Playfair Display', serif">Serif Italic</option>
+                    <option value="'JetBrains Mono', monospace">Monospace</option>
+                </select>
+                <div class="flex flex-col gap-1">
+                    <div class="flex items-center gap-2">
+                        <span class="text-[7px] opacity-30 w-4">SIZE</span>
+                        <input type="range" id="sizeSlider" min="8" max="300" value="16" oninput="updateTypography('size', this.value)" onchange="recordHistory()" class="w-16">
+                        <input type="number" id="sizeInput" value="16" oninput="updateTypography('size', this.value)" onchange="recordHistory()" class="input-num">
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-[7px] opacity-30 w-4">LS</span>
+                        <input type="range" id="lsSlider" min="-10" max="100" value="0" step="0.5" oninput="updateTypography('ls', this.value)" onchange="recordHistory()" class="w-16">
+                        <input type="number" id="lsInput" value="0" step="0.5" oninput="updateTypography('ls', this.value)" onchange="recordHistory()" class="input-num">
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-[7px] opacity-30 w-4">LH</span>
+                        <input type="range" id="lhSlider" min="0.1" max="5" value="1.2" step="0.1" oninput="updateTypography('lh', this.value)" onchange="recordHistory()" class="w-16">
+                        <input type="number" id="lhInput" value="1.2" step="0.1" oninput="updateTypography('lh', this.value)" onchange="recordHistory()" class="input-num">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 요소 추가 및 관리 -->
+        <div class="flex flex-col items-start">
+            <span class="text-[7px] opacity-40 mb-1 tracking-widest uppercase">Elements</span>
+            <div class="flex items-center gap-3">
+                <button class="tool-item" onclick="addNewText()">+ TEXT</button>
+                <button class="tool-item" onclick="document.getElementById('img-upload').click()">+ IMAGE</button>
+                <div class="relative group">
+                    <button class="tool-item">+ SHAPE</button>
+                    <div class="absolute bottom-full left-0 mb-2 hidden group-hover:flex flex-col bg-black border border-white/20 p-2 rounded shadow-xl gap-2 min-w-[100px]">
+                        <button class="text-[9px] hover:text-red-500 text-left" onclick="addNewShape('rect')">RECTANGLE</button>
+                        <button class="text-[9px] hover:text-red-500 text-left" onclick="addNewShape('circle')">CIRCLE</button>
+                        <button class="text-[9px] hover:text-red-500 text-left" onclick="addNewShape('line')">LINE</button>
+                    </div>
+                </div>
+                <button class="tool-item" id="linkBtn" onclick="openLinkModal()" style="display:none; color: #ffeb3b">LINK</button>
+                <button id="gridToggle" class="tool-item" onclick="toggleGrid()">GRID: OFF</button>
+                <button class="tool-item danger" onclick="deleteSelected()">DELETE</button>
+                <button class="tool-item" style="color: #4ade80" onclick="clearStorage()">RESET ALL</button>
+            </div>
+        </div>
+        
+        <div class="flex flex-col items-center ml-auto">
+            <div id="save-status">SAVED</div>
+        </div>
+
+        <input type="file" id="img-upload" hidden accept="image/*" onchange="handleImageUpload(event)">
+    </div>
+
+    <!-- 페이지 높이 컨트롤러 -->
+    <div id="height-controller">
+        <span class="text-[9px] font-bold opacity-60 tracking-widest uppercase">Page Height</span>
+        <div class="flex items-center gap-4">
+            <input type="range" id="heightSlider" min="100" max="10000" value="1500" 
+                   oninput="adjustPageHeight(this.value)" onchange="recordHistory()" class="w-48">
+            <input type="number" id="heightInput" value="1500" oninput="adjustPageHeight(this.value)" onchange="recordHistory()" class="input-num !w-60">
+        </div>
+    </div>
+
+    <!-- 에딧 모드 토글 버튼 -->
+    <div class="fixed right-8 top-8 z-50 flex items-center gap-4">
+        <div id="editBtn" class="edit-btn" onclick="requestEditMode()">Edit Mode: OFF</div>
+    </div>
+
+    <!-- 페이지 컨텐츠 컨테이너 -->
+    <div id="app-pages">
+        <div id="view-landing" class="overlay w-full page-content active" style="height: 1500px;">
+            <div class="relative w-full h-full">
+                <nav class="draggable w-full flex justify-between items-center px-10 py-12" style="top: 0; left: 0;" onclick="setSelected(this)">
+                    <div class="text-2xl font-bold tracking-tighter serif-font italic content-editable">Portfolio</div>
+                </nav>
+                <div class="draggable" style="top: 320px; left: 40px;" onclick="setSelected(this)">
+                    <h1 class="text-xs tracking-[0.8em] uppercase opacity-40 content-editable">Where fragments become form</h1>
+                </div>
+                <div id="projects-container" class="w-full">
+                    <div class="draggable" style="top: 480px; left: 40px;" onclick="setSelected(this)" data-link="detail-about">
+                        <div class="project-text serif-font project-trigger content-editable" data-morph="scatter">About me</div>
+                        <p class="text-xs opacity-30 mt-2 tracking-widest content-editable">#PROFILE #STORY</p>
+                    </div>
+                    <div class="draggable text-right" style="top: 680px; right: 40px;" onclick="setSelected(this)" data-link="detail-space">
+                        <div class="project-text serif-font project-trigger content-editable" data-morph="plane">Space Project</div>
+                        <p class="text-xs opacity-30 mt-2 tracking-widest content-editable">#ENVIRONMENT #3D</p>
+                    </div>
+                    <div class="draggable" style="top: 920px; left: 40px;" onclick="setSelected(this)" data-link="detail-visual">
+                        <div class="project-text serif-font project-trigger content-editable" data-morph="ring">Visual Project</div>
+                        <p class="text-xs opacity-30 mt-2 tracking-widest content-editable">#GENERATIVE #MOTION</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 기본 상세 페이지들 -->
+        <div id="view-detail-about" class="overlay w-full page-content" style="height: 1200px;">
+            <div class="relative w-full h-full">
+                <div class="back-btn" onclick="goBack()">← BACK TO PREVIOUS</div>
+                <div class="draggable" style="top: 180px; left: 10%;" onclick="setSelected(this)">
+                    <h2 class="text-7xl serif-font italic mb-4 content-editable">About me</h2>
+                    <p class="text-xs opacity-40 tracking-[0.4em] content-editable">IDENTITY & VISION</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-detail-space" class="overlay w-full page-content" style="height: 1200px;">
+            <div class="relative w-full h-full">
+                <div class="back-btn" onclick="goBack()">← BACK TO PREVIOUS</div>
+                <div class="draggable" style="top: 180px; left: 10%;" onclick="setSelected(this)">
+                    <h2 class="text-7xl serif-font italic mb-4 content-editable">Space Project</h2>
+                    <p class="text-xs opacity-40 tracking-[0.4em] content-editable">ENVIRONMENTAL ARCHITECTURE</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-detail-visual" class="overlay w-full page-content" style="height: 1200px;">
+            <div class="relative w-full h-full">
+                <div class="back-btn" onclick="goBack()">← BACK TO PREVIOUS</div>
+                <div class="draggable" style="top: 180px; left: 10%;" onclick="setSelected(this)">
+                    <h2 class="text-7xl serif-font italic mb-4 content-editable">Visual Project</h2>
+                    <p class="text-xs opacity-40 tracking-[0.4em] content-editable">GENERATIVE ART & MOTION</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * 상태 및 글로벌 변수
+         */
+        let isEditMode = false;
+        let isGridEnabled = false;
+        let gridSize = 20;
+        let selectedElement = null;
+        let dragElement = null;
+        let resizeElement = null;
+        let offset = { x: 0, y: 0 };
+        let initialSize = { w: 0, h: 0 };
+        let currentView = 'landing';
+        let viewStack = []; 
+        let history = [];
+        let historyIndex = -1;
+
+        const STORAGE_KEY = "BLOCKCHAIN_PORTFOLIO_DYNAMIC_V1";
+
+        /**
+         * 내비게이션 시스템
+         */
+        function navigateTo(viewId, isBack = false) {
+            if (isEditMode) recordHistory();
+            if (viewId.startsWith('http')) { window.open(viewId, '_blank'); return; }
+            if (viewId === 'new page') { viewId = createNewPage(); }
+
+            const searchId = viewId.startsWith('view-') ? viewId : `view-${viewId}`;
+            const target = document.getElementById(searchId);
+            
+            if (target) {
+                if (!isBack && currentView !== viewId.replace('view-', '')) {
+                    viewStack.push(currentView);
+                }
+                document.querySelectorAll('.page-content').forEach(p => p.classList.remove('active'));
+                target.classList.add('active');
+                currentView = viewId.replace('view-', '');
+                window.scrollTo(0, 0);
+                if (isEditMode) updateHeightUI();
+                reset3DTarget();
+            }
+        }
+
+        function goBack() {
+            if (viewStack.length > 0) { navigateTo(viewStack.pop(), true); } 
+            else { navigateTo('landing', true); }
+        }
+
+        function createNewPage(requestedId = null) {
+            const pageId = requestedId || `user-${Date.now()}`;
+            const fullId = `view-${pageId}`;
+            if (document.getElementById(fullId)) return pageId;
+
+            const newPage = document.createElement('div');
+            newPage.id = fullId;
+            newPage.className = 'overlay w-full page-content';
+            newPage.style.height = '1200px';
+            newPage.innerHTML = `
+                <div class="relative w-full h-full">
+                    <div class="back-btn" onclick="goBack()">← BACK TO PREVIOUS</div>
+                    <div class="draggable" style="top: 200px; left: 10%;" onclick="setSelected(this)">
+                        <h2 class="text-7xl serif-font italic mb-4 content-editable">New Page</h2>
+                        <p class="text-xs opacity-40 tracking-[0.4em] content-editable">START EDITING HERE</p>
+                    </div>
+                </div>
+            `;
+            document.getElementById('app-pages').appendChild(newPage);
+            initDraggable(); bindEditableEvents(); rebindResizeHandles();
+            return pageId;
+        }
+
+        /**
+         * 에디팅 및 인증 로직
+         */
+        function requestEditMode() { 
+            if (isEditMode) { 
+                toggleEditMode(); 
+            } else { 
+                const authModal = document.getElementById('auth-modal');
+                const passInput = document.getElementById('passInput');
+                
+                // 모달 열 때마다 입력 필드 리셋
+                passInput.value = '';
+                authModal.style.display = 'flex'; 
+                passInput.focus(); 
+            } 
+        }
+        
+        function closeAuthModal() { 
+            document.getElementById('auth-modal').style.display = 'none'; 
+            document.getElementById('passInput').value = ''; // 닫을 때도 리셋
+        }
+        
+        function verifyPassword() { 
+            if (document.getElementById('passInput').value === 'chzh') { 
+                closeAuthModal(); 
+                toggleEditMode(); 
+            } else { 
+                alert('Access Denied'); 
+                document.getElementById('passInput').value = ''; // 틀렸을 때도 리셋
+                document.getElementById('passInput').focus();
+            } 
+        }
+
+        function toggleEditMode() {
+            isEditMode = !isEditMode;
+            document.body.classList.toggle('edit-active', isEditMode);
+            const btn = document.getElementById('editBtn');
+            btn.innerText = isEditMode ? "Edit Mode: ON" : "Edit Mode: OFF";
+            btn.classList.toggle('active', isEditMode);
+            bindEditableEvents();
+            if (isEditMode) { 
+                initDraggable(); updateHeightUI(); 
+                if(historyIndex===-1) recordHistory(); 
+            } else { 
+                if(selectedElement) selectedElement.classList.remove('selected-highlight');
+                selectedElement = null;
+                document.getElementById('linkBtn').style.display = 'none';
+                saveToLocalStorage();
+                bind3DTriggers(); 
+            }
+        }
+
+        function setSelected(el) {
+            if (!isEditMode) return;
+            if (selectedElement) selectedElement.classList.remove('selected-highlight');
+            selectedElement = el.closest('.draggable') || el;
+            selectedElement.classList.add('selected-highlight');
+            document.getElementById('linkBtn').style.display = 'block';
+            
+            const content = selectedElement.querySelector('.content-editable') || selectedElement;
+            const hasAsset = selectedElement.querySelector('img') || selectedElement.querySelector('.shape-element');
+            
+            if (hasAsset) {
+                document.getElementById('typo-tools').style.display = 'none';
+            } else {
+                document.getElementById('typo-tools').style.display = 'flex';
+                const style = window.getComputedStyle(content);
+                
+                const size = parseInt(style.fontSize) || 16;
+                const ls = parseFloat(style.letterSpacing.replace('px','')) || 0;
+                const lhValue = style.lineHeight === 'normal' ? '1.2' : parseFloat(style.lineHeight);
+                const lh = isNaN(lhValue) ? 1.2 : (lhValue / size).toFixed(1);
+
+                document.getElementById('sizeSlider').value = size;
+                document.getElementById('sizeInput').value = size;
+                document.getElementById('lsSlider').value = ls;
+                document.getElementById('lsInput').value = ls;
+                document.getElementById('lhSlider').value = lh;
+                document.getElementById('lhInput').value = lh;
+            }
+        }
+
+        /**
+         * 스타일 조절 함수
+         */
+        function updateTypography(type, val) {
+            if (!selectedElement) return;
+            const content = selectedElement.querySelector('.content-editable') || selectedElement;
+            
+            if (type === 'size') {
+                content.style.fontSize = val + 'px';
+                document.getElementById('sizeSlider').value = val;
+                document.getElementById('sizeInput').value = val;
+            } else if (type === 'ls') {
+                content.style.letterSpacing = val + 'px';
+                document.getElementById('lsSlider').value = val;
+                document.getElementById('lsInput').value = val;
+            } else if (type === 'lh') {
+                content.style.lineHeight = val;
+                document.getElementById('lhSlider').value = val;
+                document.getElementById('lhInput').value = val;
+            }
+        }
+
+        function changeFont(f) { if(selectedElement) { (selectedElement.querySelector('.content-editable') || selectedElement).style.fontFamily = f; recordHistory(); } }
+
+        function deleteSelected() { if(selectedElement) { selectedElement.remove(); selectedElement = null; recordHistory(); } }
+
+        function openLinkModal() {
+            if(!selectedElement) return;
+            const linkModal = document.getElementById('link-modal');
+            const linkInput = document.getElementById('linkInput');
+            linkModal.style.display = 'flex';
+            linkInput.value = selectedElement.getAttribute('data-link') || '';
+            linkInput.focus();
+        }
+
+        function closeLinkModal() { document.getElementById('link-modal').style.display = 'none'; }
+
+        function saveLink(overrideValue = null) {
+            const linkVal = overrideValue || document.getElementById('linkInput').value.trim();
+            if (selectedElement) {
+                if (linkVal === 'new page') {
+                    const newId = createNewPage();
+                    selectedElement.setAttribute('data-link', newId);
+                    navigateTo(newId);
+                } else if (linkVal) {
+                    selectedElement.setAttribute('data-link', linkVal);
+                } else {
+                    selectedElement.removeAttribute('data-link');
+                }
+                recordHistory();
+                closeLinkModal();
+            }
+        }
+
+        /**
+         * 드래그 앤 드롭 로직
+         */
+        function onMouseDown(e) {
+            if (!isEditMode) {
+                const link = this.getAttribute('data-link');
+                if (link) navigateTo(link);
+                return;
+            }
+            if (e.target.contentEditable === "true" || e.target.classList.contains('resize-handle')) return;
+            let target = this;
+            if (e.altKey) {
+                const clone = target.cloneNode(true);
+                target.parentNode.appendChild(clone);
+                target = clone;
+                initDraggable(); bindEditableEvents(); rebindResizeHandles();
+            }
+            dragElement = target; setSelected(dragElement);
+            offset.x = e.pageX - parseFloat(dragElement.style.left || 0);
+            offset.y = e.pageY - parseFloat(dragElement.style.top || 0);
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+            e.preventDefault();
+        }
+
+        function onMouseMove(e) {
+            if (!dragElement) return;
+            let tx = e.pageX - offset.x; let ty = e.pageY - offset.y;
+            if (isGridEnabled) { tx = Math.round(tx/gridSize)*gridSize; ty = Math.round(ty/gridSize)*gridSize; }
+            dragElement.style.left = tx + 'px'; dragElement.style.top = ty + 'px';
+        }
+
+        function onMouseUp() { if(dragElement) recordHistory(); dragElement = null; document.removeEventListener('mousemove', onMouseMove); }
+
+        function initDraggable() {
+            document.querySelectorAll('.draggable').forEach(el => {
+                el.removeEventListener('mousedown', onMouseDown);
+                el.addEventListener('mousedown', onMouseDown);
+            });
+        }
+
+        function rebindResizeHandles() { document.querySelectorAll('.resize-handle').forEach(el => el.onmousedown = onResizeStart); }
+
+        function onResizeStart(e) {
+            if (!isEditMode) return;
+            e.stopPropagation(); e.preventDefault();
+            resizeElement = e.target.closest('.draggable');
+            const rect = resizeElement.getBoundingClientRect();
+            initialSize.w = rect.width; initialSize.h = rect.height;
+            offset.x = e.pageX; offset.y = e.pageY;
+            document.addEventListener('mousemove', onResizeMove);
+            document.addEventListener('mouseup', onResizeEnd);
+        }
+
+        function onResizeMove(e) {
+            if (!resizeElement) return;
+            let nw = initialSize.w + (e.pageX - offset.x);
+            let nh = initialSize.h + (e.pageY - offset.y);
+            if (isGridEnabled) { nw = Math.round(nw/gridSize)*gridSize; nh = Math.round(nh/gridSize)*gridSize; }
+            resizeElement.style.width = Math.max(10, nw) + 'px';
+            resizeElement.style.height = Math.max(1, nh) + 'px';
+        }
+        
+        function onResizeEnd() { if(resizeElement) recordHistory(); resizeElement = null; document.removeEventListener('mousemove', onResizeMove); }
+
+        function bindEditableEvents() {
+            document.querySelectorAll('.content-editable').forEach(el => {
+                if(isEditMode) {
+                    el.ondblclick = (e) => { e.stopPropagation(); el.contentEditable = "true"; el.focus(); };
+                    el.onblur = () => { el.contentEditable = "false"; recordHistory(); };
+                } else { el.contentEditable = "false"; }
+            });
+        }
+
+        /**
+         * 요소 생성
+         */
+        function addNewText() {
+            const div = document.createElement('div');
+            div.className = 'draggable z-30'; div.style.left = '100px'; div.style.top = (window.scrollY + 200) + 'px';
+            div.innerHTML = `<div class="content-editable min-w-[150px] p-2 text-xl">New Creative Text</div>`;
+            document.querySelector('.page-content.active .relative').appendChild(div);
+            initDraggable(); bindEditableEvents(); setSelected(div); recordHistory();
+        }
+
+        function addNewShape(type) {
+            const div = document.createElement('div');
+            div.className = 'draggable z-10'; div.style.left = '150px'; div.style.top = (window.scrollY + 200) + 'px';
+            div.style.width = type==='line'?'200px':'150px'; div.style.height = type==='line'?'1px':'150px';
+            div.innerHTML = `<div class="shape-element shape-${type}"></div><div class="resize-handle"></div>`;
+            document.querySelector('.page-content.active .relative').appendChild(div);
+            initDraggable(); rebindResizeHandles(); setSelected(div); recordHistory();
+        }
+
+        function handleImageUpload(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const div = document.createElement('div');
+                    div.className = 'draggable z-20'; div.style.left = '100px'; div.style.top = (window.scrollY + 100) + 'px'; div.style.width = '350px';
+                    div.innerHTML = `<img src="${ev.target.result}" class="uploaded-img shadow-2xl"><div class="resize-handle"></div>`;
+                    document.querySelector('.page-content.active .relative').appendChild(div);
+                    initDraggable(); rebindResizeHandles(); setSelected(div); recordHistory();
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        /**
+         * 저장 및 히스토리 관리
+         */
+        function saveToLocalStorage() {
+            const state = {};
+            document.querySelectorAll('.page-content').forEach(p => { state[p.id] = { html: p.innerHTML, height: p.style.height }; });
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            const status = document.getElementById('save-status');
+            if (status) { status.classList.add('visible'); setTimeout(() => status.classList.remove('visible'), 1500); }
+        }
+
+        function loadFromLocalStorage() {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                const state = JSON.parse(saved);
+                Object.keys(state).forEach(id => {
+                    let el = document.getElementById(id);
+                    if (!el) { createNewPage(id.replace('view-', '')); el = document.getElementById(id); }
+                    if (el) { el.innerHTML = state[id].html; el.style.height = state[id].height; }
+                });
+                initDraggable(); bindEditableEvents(); rebindResizeHandles();
+            }
+        }
+
+        function clearStorage() { if (confirm("모든 데이터를 초기화하시겠습니까?")) { localStorage.removeItem(STORAGE_KEY); location.reload(); } }
+
+        function recordHistory() {
+            const state = {};
+            document.querySelectorAll('.page-content').forEach(p => { state[p.id] = { html: p.innerHTML, height: p.style.height }; });
+            if (historyIndex < history.length - 1) history = history.slice(0, historyIndex + 1);
+            history.push(JSON.stringify(state));
+            if (history.length > 50) history.shift(); else historyIndex++;
+            updateHistoryButtons(); saveToLocalStorage();
+        }
+
+        function undo() { if(historyIndex > 0) { historyIndex--; applyFullState(JSON.parse(history[historyIndex])); } }
+        function redo() { if(historyIndex < history.length - 1) { historyIndex++; applyFullState(JSON.parse(history[historyIndex])); } }
+        
+        function applyFullState(state) {
+            Object.keys(state).forEach(id => {
+                let el = document.getElementById(id);
+                if (!el) { createNewPage(id.replace('view-', '')); el = document.getElementById(id); }
+                if (el) { el.innerHTML = state[id].html; el.style.height = state[id].height; }
+            });
+            initDraggable(); bindEditableEvents(); rebindResizeHandles(); updateHeightUI(); updateHistoryButtons();
+        }
+
+        function updateHistoryButtons() {
+            document.getElementById('undoBtn').disabled = historyIndex <= 0;
+            document.getElementById('redoBtn').disabled = historyIndex >= history.length - 1;
+        }
+
+        function toggleGrid() { isGridEnabled = !isGridEnabled; document.body.classList.toggle('grid-active'); document.getElementById('gridToggle').innerText = isGridEnabled ? "GRID: ON" : "GRID: OFF"; }
+        
+        function adjustPageHeight(v) { 
+            const p = document.querySelector('.page-content.active'); 
+            if(p) { 
+                p.style.height = v + 'px'; 
+                document.getElementById('heightSlider').value = v;
+                document.getElementById('heightInput').value = v;
+            } 
+        }
+        
+        function updateHeightUI() { 
+            const p = document.querySelector('.page-content.active'); 
+            if(p) { 
+                const h = parseInt(p.style.height) || 1500; 
+                document.getElementById('heightSlider').value = h; 
+                document.getElementById('heightInput').value = h;
+            } 
+        }
+
+        /**
+         * Three.js 파티클 애니메이션
+         */
+        let scene, camera, renderer, cloud;
+        const count = 25000;
+        const originalPositions = new Float32Array(count * 3);
+        const targetPositions = new Float32Array(count * 3);
+        let mx = 0, my = 0, tx = 0, ty = 0;
+
+        function initThree() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+            
+            for(let i=0; i<count; i++) {
+                const r = 5 + Math.random() * 2; 
+                const u = Math.random() * Math.PI * 2; 
+                const v = Math.random() * Math.PI;
+                originalPositions[i*3] = r * Math.sin(v) * Math.cos(u);
+                originalPositions[i*3+1] = r * Math.sin(v) * Math.sin(u);
+                originalPositions[i*3+2] = r * Math.cos(v);
+                targetPositions[i*3] = originalPositions[i*3];
+                targetPositions[i*3+1] = originalPositions[i*3+1];
+                targetPositions[i*3+2] = originalPositions[i*3+2];
+            }
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(originalPositions), 3));
+            cloud = new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.007, color: 0xffffff, transparent: true, opacity: 0.35 }));
+            scene.add(cloud); 
+            camera.position.z = 12;
+            window.addEventListener('mousemove', e => { 
+                tx = (e.clientX/window.innerWidth-0.5)*2; 
+                ty = -(e.clientY/window.innerHeight-0.5)*2; 
+            });
+            animate();
+            bind3DTriggers();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            mx += (tx-mx)*0.08; my += (ty-my)*0.08;
+            camera.position.x += (mx*3 - camera.position.x)*0.05;
+            camera.position.y += (my*3 - camera.position.y)*0.05;
+            camera.lookAt(0,0,0);
+            
+            const pos = cloud.geometry.attributes.position;
+            for(let i=0; i<count*3; i++) { pos.array[i] += (targetPositions[i]-pos.array[i])*0.08; }
+            pos.needsUpdate = true; 
+            cloud.rotation.y += 0.001;
+            renderer.render(scene, camera);
+        }
+
+        function morphParticles(type) {
+            if (!cloud) return;
+            for(let i=0; i<count; i++) {
+                const i3 = i * 3;
+                if (type === 'scatter') {
+                    const r = 15 + Math.random() * 10;
+                    const u = Math.random() * Math.PI * 2;
+                    const v = Math.random() * Math.PI;
+                    targetPositions[i3] = r * Math.sin(v) * Math.cos(u);
+                    targetPositions[i3+1] = r * Math.sin(v) * Math.sin(u);
+                    targetPositions[i3+2] = r * Math.cos(v);
+                } else if (type === 'plane') {
+                    const ix = i % 158; const iy = Math.floor(i / 158);
+                    targetPositions[i3] = (ix - 79) * 0.25;
+                    targetPositions[i3+1] = (iy - 79) * 0.25;
+                    targetPositions[i3+2] = -5;
+                } else if (type === 'ring') {
+                    const u = Math.random() * Math.PI * 2; const v = Math.random() * Math.PI * 2;
+                    const majorR = 8; const minorR = 1.5;
+                    targetPositions[i3] = (majorR + minorR * Math.cos(v)) * Math.cos(u);
+                    targetPositions[i3+1] = minorR * Math.sin(v);
+                    targetPositions[i3+2] = (majorR + minorR * Math.cos(v)) * Math.sin(u);
+                } else {
+                    targetPositions[i3] = originalPositions[i3];
+                    targetPositions[i3+1] = originalPositions[i3+1];
+                    targetPositions[i3+2] = originalPositions[i3+2];
+                }
+            }
+        }
+
+        function reset3DTarget() { morphParticles('sphere'); }
+
+        function bind3DTriggers() {
+            document.querySelectorAll('.project-trigger').forEach(el => {
+                el.addEventListener('mouseenter', () => { if (!isEditMode) morphParticles(el.getAttribute('data-morph')); });
+                el.addEventListener('mouseleave', () => { if (!isEditMode) reset3DTarget(); });
+            });
+        }
+
+        window.onload = () => { loadFromLocalStorage(); initThree(); };
+        window.onresize = () => { 
+            camera.aspect = window.innerWidth/window.innerHeight; 
+            camera.updateProjectionMatrix(); 
+            renderer.setSize(window.innerWidth, window.innerHeight); 
+        };
+    </script>
+</body>
+</html>
